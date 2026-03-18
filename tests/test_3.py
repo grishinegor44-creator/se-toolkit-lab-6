@@ -29,6 +29,29 @@ def run_agent(
 
     monkeypatch.setattr(agent, "request_chat_completion", fake_request_chat_completion)
 
+    class FakeResponse:
+        def __init__(self, status_code: int, json_body):
+            self.status_code = status_code
+            self._json_body = json_body
+            self.text = json.dumps(json_body)
+
+        def json(self):
+            return self._json_body
+
+    def fake_request(self, method, url, headers=None, json=None):
+        if url.endswith("/items/"):
+            return FakeResponse(
+                200,
+                [
+                    {"id": 1, "name": "Item 1"},
+                    {"id": 2, "name": "Item 2"},
+                    {"id": 3, "name": "Item 3"},
+                ],
+            )
+        raise AssertionError(f"Unexpected API request: {method} {url}")
+
+    monkeypatch.setattr(agent.httpx.Client, "request", fake_request)
+
     stdout = io.StringIO()
     monkeypatch.setattr(sys, "stdout", stdout)
 
@@ -37,13 +60,11 @@ def run_agent(
     return json.loads(stdout.getvalue())
 
 
-def test_merge_conflict_question_uses_read_file(monkeypatch, tmp_path: Path):
-    wiki_dir = tmp_path / "wiki"
-    wiki_dir.mkdir()
-    (wiki_dir / "git-workflow.md").write_text(
-        "# Git Workflow\n\n"
-        "## Resolving merge conflicts\n\n"
-        "Edit the conflicting file, choose which changes to keep, then stage and commit.\n",
+def test_framework_question_uses_read_file(monkeypatch, tmp_path: Path):
+    backend_dir = tmp_path / "backend"
+    backend_dir.mkdir()
+    (backend_dir / "main.py").write_text(
+        "from fastapi import FastAPI\n\napp = FastAPI()\n",
         encoding="utf-8",
     )
 
@@ -60,7 +81,7 @@ def test_merge_conflict_question_uses_read_file(monkeypatch, tmp_path: Path):
                                 "function": {
                                     "name": "read_file",
                                     "arguments": json.dumps(
-                                        {"path": "wiki/git-workflow.md"}
+                                        {"path": "backend/main.py"}
                                     ),
                                 },
                             }
@@ -75,11 +96,8 @@ def test_merge_conflict_question_uses_read_file(monkeypatch, tmp_path: Path):
                     "message": {
                         "content": json.dumps(
                             {
-                                "answer": (
-                                    "Edit the conflicting file, choose which changes to keep, "
-                                    "then stage and commit."
-                                ),
-                                "source": "wiki/git-workflow.md#resolving-merge-conflicts",
+                                "answer": "The backend uses FastAPI.",
+                                "source": "backend/main.py",
                             }
                         )
                     }
@@ -88,27 +106,30 @@ def test_merge_conflict_question_uses_read_file(monkeypatch, tmp_path: Path):
         },
     ]
 
-    result = run_agent(
+    payload = run_agent(
         monkeypatch,
         tmp_path,
-        "How do you resolve a merge conflict?",
+        "What framework does the backend use?",
         responses,
     )
 
-    assert result["answer"]
-    assert result["source"] == "wiki/git-workflow.md#resolving-merge-conflicts"
-    assert len(result["tool_calls"]) == 1
-    assert result["tool_calls"][0]["tool"] == "read_file"
-    assert result["tool_calls"][0]["args"] == {"path": "wiki/git-workflow.md"}
-    assert "Resolving merge conflicts" in result["tool_calls"][0]["result"]
+    read_calls = [
+        call
+        for call in payload.get("tool_calls", [])
+        if call.get("tool") == "read_file"
+    ]
+
+    assert payload["answer"].strip(), "Answer must not be empty"
+    assert read_calls, (
+        "Expected the agent to use read_file for a static system fact question"
+    )
+
+    first_call = read_calls[0]
+    assert first_call["args"] == {"path": "backend/main.py"}
+    assert "FastAPI" in first_call["result"]
 
 
-def test_wiki_listing_question_uses_list_files(monkeypatch, tmp_path: Path):
-    wiki_dir = tmp_path / "wiki"
-    wiki_dir.mkdir()
-    (wiki_dir / "git-workflow.md").write_text("# Git Workflow\n", encoding="utf-8")
-    (wiki_dir / "testing.md").write_text("# Testing\n", encoding="utf-8")
-
+def test_item_count_question_uses_query_api(monkeypatch, tmp_path: Path):
     responses = [
         {
             "choices": [
@@ -120,8 +141,10 @@ def test_wiki_listing_question_uses_list_files(monkeypatch, tmp_path: Path):
                                 "id": "call_1",
                                 "type": "function",
                                 "function": {
-                                    "name": "list_files",
-                                    "arguments": json.dumps({"path": "wiki"}),
+                                    "name": "query_api",
+                                    "arguments": json.dumps(
+                                        {"method": "GET", "path": "/items/"}
+                                    ),
                                 },
                             }
                         ],
@@ -135,8 +158,8 @@ def test_wiki_listing_question_uses_list_files(monkeypatch, tmp_path: Path):
                     "message": {
                         "content": json.dumps(
                             {
-                                "answer": "The wiki contains git-workflow.md and testing.md.",
-                                "source": "wiki",
+                                "answer": "There are 3 items in the database.",
+                                "source": "",
                             }
                         )
                     }
@@ -145,17 +168,28 @@ def test_wiki_listing_question_uses_list_files(monkeypatch, tmp_path: Path):
         },
     ]
 
-    result = run_agent(
+    payload = run_agent(
         monkeypatch,
         tmp_path,
-        "What files are in the wiki?",
+        "How many items are in the database?",
         responses,
     )
 
-    assert result["answer"]
-    assert result["source"] == "wiki"
-    assert len(result["tool_calls"]) == 1
-    assert result["tool_calls"][0]["tool"] == "list_files"
-    assert result["tool_calls"][0]["args"] == {"path": "wiki"}
-    assert "git-workflow.md" in result["tool_calls"][0]["result"]
-    assert "testing.md" in result["tool_calls"][0]["result"]
+    api_calls = [
+        call
+        for call in payload.get("tool_calls", [])
+        if call.get("tool") == "query_api"
+    ]
+
+    assert payload["answer"].strip(), "Answer must not be empty"
+    assert api_calls, (
+        "Expected the agent to use query_api for a data-dependent question"
+    )
+
+    first_call = api_calls[0]
+    assert first_call["args"] == {"method": "GET", "path": "/items/"}
+
+    parsed_result = json.loads(first_call["result"])
+    assert parsed_result["status_code"] == 200
+    assert isinstance(parsed_result["body"], list)
+    assert len(parsed_result["body"]) == 3
