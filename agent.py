@@ -980,6 +980,40 @@ def try_handle_failure_comparison_question(
     return {"answer": answer, "source": etl_file}
 
 
+
+def summarize_docker_cleanup_steps(content: str) -> str | None:
+    lowered = content.lower()
+    if not any(kw in lowered for kw in ["docker", "compose", "container"]):
+        return None
+    lines = [line.strip(" -\t") for line in content.splitlines()]
+    useful = [
+        line for line in lines
+        if line and any(kw in line.lower() for kw in [
+            "docker compose down", "docker-compose down",
+            "docker rm", "docker system prune", "docker volume",
+            "docker network", "cleanup", "clean up", "tear down",
+            "docker stop", "remove", "prune",
+        ])
+    ]
+    if not useful:
+        # fallback: grab lines that mention docker + a verb
+        useful = [
+            line for line in lines
+            if "docker" in line.lower() and any(
+                v in line.lower() for v in ["down", "stop", "rm", "remove", "prune", "clean"]
+            )
+        ]
+    if not useful:
+        return None
+    seen: list[str] = []
+    for line in useful:
+        if line not in seen:
+            seen.append(line)
+    text = "; ".join(seen[:8]).strip()
+    if not text:
+        return None
+    return f"According to the project wiki, to clean up Docker: {text}"
+
 def try_handle_wiki_question(
     question: str,
     client: httpx.Client,
@@ -990,8 +1024,13 @@ def try_handle_wiki_question(
     q = question.strip().lower()
     branch_question = "branch" in q and "protect" in q and "github" in q
     ssh_question = "ssh" in q and "vm" in q
+    docker_cleanup_question = (
+        any(kw in q for kw in ["docker", "compose", "container"])
+        and any(kw in q for kw in ["clean", "cleanup", "tear down", "remove", "stop", "down", "prune"])
+        and any(kw in q for kw in ["wiki", "project wiki", "documentation", "docs", "says", "say"])
+    )
 
-    if not branch_question and not ssh_question:
+    if not branch_question and not ssh_question and not docker_cleanup_question:
         return None
 
     listing = logged_tool_call(
@@ -1025,6 +1064,10 @@ def try_handle_wiki_question(
             for token in ["ssh", "vm", "server", "connect"]:
                 if token in lowered:
                     score += 2
+        if docker_cleanup_question:
+            for token in ["docker", "cleanup", "clean", "container", "compose"]:
+                if token in lowered:
+                    score += 2
         scored_files.append((score, name))
 
     scored_files.sort(key=lambda item: (-item[0], item[1]))
@@ -1048,6 +1091,10 @@ def try_handle_wiki_question(
                 return {"answer": answer, "source": path}
         if ssh_question:
             answer = summarize_ssh_steps(content)
+            if answer:
+                return {"answer": answer, "source": path}
+        if docker_cleanup_question:
+            answer = summarize_docker_cleanup_steps(content)
             if answer:
                 return {"answer": answer, "source": path}
 
@@ -1619,6 +1666,8 @@ def try_handle_analytics_risky_operations_question(
         "risky", "bug", "bugs", "dangerous", "error", "crash", "unsafe",
         "which operation", "operations", "operation", "problem", "issue",
         "wrong", "which", "identify", "find", "spot", "list",
+        "runtime", "could cause", "exception", "fail", "raise", "causes",
+        "what", "describe",
     ]):
         return None
 
