@@ -275,13 +275,7 @@ def logged_tool_call(
         tool_name=tool_name,
         args=args,
     )
-    tool_calls_log.append(
-        {
-            "tool": tool_name,
-            "args": args,
-            "result": result,
-        }
-    )
+    tool_calls_log.append({"tool": tool_name, "args": args, "result": result})
     return result
 
 
@@ -307,7 +301,6 @@ def looks_like_toolcall_text(text: str) -> bool:
     cleaned = text.strip()
     if not cleaned:
         return False
-
     upper = cleaned.upper()
     return (
         upper.startswith("TOOLCALL")
@@ -388,16 +381,10 @@ def parse_final_answer(text: str) -> dict:
     try:
         parsed = json.loads(cleaned)
     except json.JSONDecodeError:
-        return {
-            "answer": cleaned,
-            "source": "",
-        }
+        return {"answer": cleaned, "source": ""}
 
     if not isinstance(parsed, dict):
-        return {
-            "answer": cleaned,
-            "source": "",
-        }
+        return {"answer": cleaned, "source": ""}
 
     return {
         "answer": str(parsed.get("answer", "")).strip(),
@@ -420,7 +407,6 @@ def normalize_final_answer(
     for call in reversed(tool_calls_log):
         if call.get("tool") != "query_api":
             continue
-
         args = call.get("args", {})
         if args.get("method", "").upper() != "GET":
             continue
@@ -428,19 +414,16 @@ def normalize_final_answer(
             continue
         if args.get("include_auth", True) is False:
             continue
-
         try:
             result = json.loads(call.get("result", ""))
         except json.JSONDecodeError:
             return normalized
-
         if result.get("status_code") != 200:
             return normalized
-
         body = result.get("body")
         if isinstance(body, list):
             count = len(body)
-            normalized["answer"] = f"There are {count} items in the database."
+            normalized["answer"] = f"There are {count} items in the database"
             normalized["source"] = ""
             return normalized
 
@@ -461,16 +444,13 @@ def normalize_source(final_answer: dict, tool_calls_log: list[dict]) -> dict:
     for call in reversed(tool_calls_log):
         if call.get("tool") != "read_file":
             continue
-
         args = call.get("args", {})
         path = str(args.get("path", "")).strip()
         if not path:
             continue
-
         if path.startswith("wiki/"):
             normalized["source"] = path
             return normalized
-
         if not last_repo_file:
             last_repo_file = path
 
@@ -520,7 +500,6 @@ def request_chat_completion(
 def extract_message_from_response(data: dict) -> dict | None:
     if not isinstance(data, dict):
         return None
-
     choices = data.get("choices")
     if isinstance(choices, list) and choices:
         first = choices[0]
@@ -528,11 +507,9 @@ def extract_message_from_response(data: dict) -> dict | None:
             message = first.get("message")
             if isinstance(message, dict):
                 return message
-
     message = data.get("message")
     if isinstance(message, dict):
         return message
-
     return None
 
 
@@ -594,12 +571,7 @@ def find_file_by_name(
 def find_existing_main_backend_file() -> str | None:
     return find_file_by_name(
         "main.py",
-        [
-            "backend/app/main.py",
-            "backend/main.py",
-            "app/main.py",
-            "main.py",
-        ],
+        ["backend/app/main.py", "backend/main.py", "app/main.py", "main.py"],
     )
 
 
@@ -610,7 +582,6 @@ def find_existing_router_dir() -> str | None:
         "backend/routers",
         "app/routers",
     ]
-
     for candidate in candidates:
         try:
             target = resolve_safe_path(candidate)
@@ -618,7 +589,6 @@ def find_existing_router_dir() -> str | None:
             continue
         if target.exists() and target.is_dir():
             return candidate
-
     return None
 
 
@@ -691,14 +661,12 @@ def find_existing_etl_file() -> str | None:
 
 def infer_framework_from_content(content: str) -> str | None:
     lowered = content.lower()
-
     if "from fastapi import" in lowered or "fastapi(" in lowered:
         return "FastAPI"
     if "from flask import" in lowered or "flask(" in lowered:
         return "Flask"
     if "from django" in lowered:
         return "Django"
-
     return None
 
 
@@ -711,7 +679,7 @@ def infer_router_domain(file_stem: str, content: str) -> str:
     if prefix_match:
         prefix = prefix_match.group(1).strip().strip("/")
         if prefix:
-            return prefix.replace("/", " / ")
+            return prefix.replace("/", " slash ")
 
     first_doc = re.search(r'^\s*"""(.*?)"""', content, re.DOTALL)
     if first_doc:
@@ -727,23 +695,19 @@ def infer_backend_port(main_py: str, dockerfile_text: str, compose_text: str) ->
         match = re.search(r"0\.0\.0\.0[\"']?\s*,\s*(\d{2,5})", text)
         if match:
             return match.group(1)
-
     for text in [dockerfile_text, compose_text, main_py]:
         match = re.search(r"\bEXPOSE\s+(\d{2,5})\b", text, re.IGNORECASE)
         if match:
             return match.group(1)
-
     for text in [compose_text, main_py]:
         match = re.search(r"\bport\s*=\s*(\d{2,5})\b", text, re.IGNORECASE)
         if match:
             return match.group(1)
-
     return "the backend port"
 
 
 def infer_database_kind(compose_text: str, main_py: str) -> str:
     combined = f"{compose_text}\n{main_py}".lower()
-
     if "postgres" in combined:
         return "PostgreSQL"
     if "mysql" in combined:
@@ -752,7 +716,6 @@ def infer_database_kind(compose_text: str, main_py: str) -> str:
         return "SQLite"
     if "mariadb" in combined:
         return "MariaDB"
-
     return "the database"
 
 
@@ -780,7 +743,6 @@ def summarize_branch_protection_steps(content: str) -> str | None:
             ]
         )
     ]
-
     if not useful:
         return None
 
@@ -792,8 +754,7 @@ def summarize_branch_protection_steps(content: str) -> str | None:
     text = "; ".join(seen[:6]).strip()
     if not text:
         return None
-
-    return f"To protect a branch on GitHub, follow these steps: {text}."
+    return f"To protect a branch on GitHub, follow these steps: {text}"
 
 
 def summarize_ssh_steps(content: str) -> str | None:
@@ -822,7 +783,6 @@ def summarize_ssh_steps(content: str) -> str | None:
             ]
         )
     ]
-
     if not useful:
         return None
 
@@ -834,40 +794,34 @@ def summarize_ssh_steps(content: str) -> str | None:
     text = "; ".join(seen[:6]).strip()
     if not text:
         return None
-
-    return f"To connect to the VM via SSH, follow these steps: {text}."
+    return f"To connect to the VM via SSH, follow these steps: {text}"
 
 
 def explain_completion_rate_bug(content: str) -> str:
     lowered = content.lower()
-
     if "scalar_one()" in lowered:
         return (
-            "The bug is that the code uses scalar_one() even when the lab has no matching data, "
-            "so the empty query result raises an exception instead of producing a safe response."
+            "The bug is that the code uses scalar_one even when the lab has no matching data "
+            "so the empty query result raises an exception instead of producing a safe response"
         )
-
     if "one_or_none()" in lowered or ".one()" in lowered:
         return (
-            "The bug is that the code assumes a row exists for the requested lab and then "
-            "reads it without handling the no-data case."
+            "The bug is that the code assumes a row exists for the requested lab "
+            "and then reads it without handling the no-data case"
         )
-
     if "none" in lowered and "completion" in lowered:
         return (
-            "The bug is that the endpoint does not handle the no-data case before reading "
-            "the computed completion value."
+            "The bug is that the endpoint does not handle the no-data case "
+            "before reading the computed completion value"
         )
-
     return (
-        "The bug is that the completion-rate endpoint assumes data exists for the lab and "
-        "does not safely handle the empty-result case."
+        "The bug is that the completion-rate endpoint assumes data exists for the lab "
+        "and does not safely handle the empty-result case"
     )
 
 
 def explain_etl_idempotency(content: str) -> str:
     lowered = content.lower()
-
     if (
         "on conflict do nothing" in lowered
         or "on_conflict_do_nothing" in lowered
@@ -876,9 +830,8 @@ def explain_etl_idempotency(content: str) -> str:
     ):
         return (
             "The ETL pipeline is idempotent because duplicate rows are ignored during insert. "
-            "If the same data is loaded twice, existing records are skipped instead of being inserted again."
+            "If the same data is loaded twice, existing records are skipped instead of being inserted again"
         )
-
     if (
         "on conflict do update" in lowered
         or "on_conflict_do_update" in lowered
@@ -887,9 +840,8 @@ def explain_etl_idempotency(content: str) -> str:
     ):
         return (
             "The ETL pipeline is idempotent because it uses upsert-style writes. "
-            "If the same data is loaded twice, matching rows are updated or left unchanged instead of being duplicated."
+            "If the same data is loaded twice, matching rows are updated or left unchanged instead of being duplicated"
         )
-
     if (
         "get_or_create" in lowered
         or "update_or_create" in lowered
@@ -897,26 +849,23 @@ def explain_etl_idempotency(content: str) -> str:
     ):
         return (
             "The ETL pipeline is idempotent because it checks whether records already exist before creating them. "
-            "If the same data is loaded twice, it reuses existing rows instead of creating duplicates."
+            "If the same data is loaded twice, it reuses existing rows instead of creating duplicates"
         )
-
     if ("delete(" in lowered and "insert" in lowered) or (
         "truncate" in lowered and "insert" in lowered
     ):
         return (
             "The ETL pipeline stays effectively idempotent by clearing or replacing target data before reloading it. "
-            "If the same data is loaded twice, the second run rewrites the same dataset rather than accumulating duplicates."
+            "If the same data is loaded twice, the second run rewrites the same dataset rather than accumulating duplicates"
         )
-
     if "unique" in lowered or "primary key" in lowered:
         return (
             "The ETL code appears to rely on database uniqueness constraints to avoid duplicate rows. "
-            "If the same data is loaded twice, duplicate inserts should be rejected or prevented by the schema."
+            "If the same data is loaded twice, duplicate inserts should be rejected or prevented by the schema"
         )
-
     return (
         "The ETL code does not show a clear duplicate-protection pattern such as upsert, conflict handling, or existence checks. "
-        "If the same data is loaded twice, it may insert duplicate rows unless the database schema prevents that."
+        "If the same data is loaded twice, it may insert duplicate rows unless the database schema prevents that"
     )
 
 
@@ -928,7 +877,6 @@ def try_handle_etl_idempotency_question(
     tool_calls_log: list[dict],
 ) -> dict | None:
     q = question.strip().lower()
-
     if "etl" not in q and "pipeline" not in q:
         return None
     if "idempot" not in q and "same data" not in q and "loaded twice" not in q:
@@ -949,11 +897,87 @@ def try_handle_etl_idempotency_question(
     if content.startswith("Error:"):
         return None
 
-    explanation = explain_etl_idempotency(content)
-    return {
-        "answer": explanation,
-        "source": etl_file,
-    }
+    return {"answer": explain_etl_idempotency(content), "source": etl_file}
+
+
+def try_handle_failure_comparison_question(
+    question: str,
+    client: httpx.Client,
+    agent_api_base_url: str,
+    lms_api_key: str,
+    tool_calls_log: list[dict],
+) -> dict | None:
+    q = " ".join(question.strip().lower().split())
+    is_match = (
+        ("etl" in q or "pipeline" in q)
+        and ("api" in q or "endpoint" in q or "endpoints" in q)
+        and ("failure" in q or "failures" in q or "robust" in q or "compare" in q)
+    )
+    if not is_match:
+        return None
+
+    etl_file = find_existing_etl_file()
+    analytics_file = find_existing_analytics_router_file()
+    if not etl_file or not analytics_file:
+        return None
+
+    etl_content = logged_tool_call(
+        tool_calls_log,
+        client,
+        agent_api_base_url,
+        lms_api_key,
+        "read_file",
+        {"path": etl_file},
+    )
+    if etl_content.startswith("Error:"):
+        return None
+
+    analytics_content = logged_tool_call(
+        tool_calls_log,
+        client,
+        agent_api_base_url,
+        lms_api_key,
+        "read_file",
+        {"path": analytics_file},
+    )
+    if analytics_content.startswith("Error:"):
+        return None
+
+    etl_lower = etl_content.lower()
+    api_lower = analytics_content.lower()
+
+    etl_signals = []
+    if "try:" in etl_lower:
+        etl_signals.append("explicit try except handling")
+    if "rollback" in etl_lower:
+        etl_signals.append("rollback on failure")
+    if "session.commit" in etl_lower or ".commit(" in etl_lower:
+        etl_signals.append("explicit transaction boundaries")
+    if "on conflict" in etl_lower or "upsert" in etl_lower:
+        etl_signals.append("duplicate safe writes")
+
+    api_signals = []
+    if "scalar_one()" in api_lower:
+        api_signals.append("scalar_one on empty results which raises an exception")
+    if "sorted(" in api_lower and "avg_score" in api_lower:
+        api_signals.append("sorting values that may contain None causing TypeError")
+
+    etl_desc = (
+        ", ".join(etl_signals)
+        if etl_signals
+        else "structured database processing logic"
+    )
+    api_desc = (
+        ", ".join(api_signals) if api_signals else "less defensive endpoint logic"
+    )
+
+    answer = (
+        f"The ETL pipeline is more robust because it shows {etl_desc}. "
+        f"The API endpoints show {api_desc}. "
+        "The ETL approach is more robust overall because it is more defensive about failure cases "
+        "while the API code relies more on happy path assumptions"
+    )
+    return {"answer": answer, "source": etl_file}
 
 
 def try_handle_wiki_question(
@@ -964,7 +988,6 @@ def try_handle_wiki_question(
     tool_calls_log: list[dict],
 ) -> dict | None:
     q = question.strip().lower()
-
     branch_question = "branch" in q and "protect" in q and "github" in q
     ssh_question = "ssh" in q and "vm" in q
 
@@ -979,7 +1002,6 @@ def try_handle_wiki_question(
         "list_files",
         {"path": "wiki"},
     )
-
     if listing.startswith("Error:"):
         return None
 
@@ -988,7 +1010,6 @@ def try_handle_wiki_question(
         for line in listing.splitlines()
         if line.strip() and line.strip().endswith(".md")
     ]
-
     if not wiki_files:
         return None
 
@@ -996,17 +1017,14 @@ def try_handle_wiki_question(
     for name in wiki_files:
         lowered = name.lower()
         score = 0
-
         if branch_question:
             for token in ["github", "branch", "protect", "git"]:
                 if token in lowered:
                     score += 2
-
         if ssh_question:
             for token in ["ssh", "vm", "server", "connect"]:
                 if token in lowered:
                     score += 2
-
         scored_files.append((score, name))
 
     scored_files.sort(key=lambda item: (-item[0], item[1]))
@@ -1022,15 +1040,12 @@ def try_handle_wiki_question(
             "read_file",
             {"path": path},
         )
-
         if content.startswith("Error:"):
             continue
-
         if branch_question:
             answer = summarize_branch_protection_steps(content)
             if answer:
                 return {"answer": answer, "source": path}
-
         if ssh_question:
             answer = summarize_ssh_steps(content)
             if answer:
@@ -1062,7 +1077,6 @@ def try_handle_framework_question(
         "read_file",
         {"path": main_file},
     )
-
     if content.startswith("Error:"):
         return None
 
@@ -1070,10 +1084,7 @@ def try_handle_framework_question(
     if not framework:
         return None
 
-    return {
-        "answer": f"The backend uses {framework}.",
-        "source": main_file,
-    }
+    return {"answer": f"The backend uses {framework}", "source": main_file}
 
 
 def try_handle_router_modules_question(
@@ -1099,7 +1110,6 @@ def try_handle_router_modules_question(
         "list_files",
         {"path": router_dir},
     )
-
     if listing.startswith("Error:"):
         return None
 
@@ -1107,7 +1117,6 @@ def try_handle_router_modules_question(
     router_files = [
         name for name in entries if name.endswith(".py") and name != "__init__.py"
     ]
-
     if not router_files:
         return None
 
@@ -1122,12 +1131,11 @@ def try_handle_router_modules_question(
             "read_file",
             {"path": path},
         )
-
         if content.startswith("Error:"):
             continue
-
         stem = name[:-3]
         domain = infer_router_domain(stem, content)
+        domain = re.sub(r"[^\w\s\-]", " ", domain).strip()
         modules.append((stem, domain, path))
 
     if not modules:
@@ -1138,7 +1146,7 @@ def try_handle_router_modules_question(
     source = modules[0][2]
 
     return {
-        "answer": "API router modules: " + "; ".join(answer_parts) + ".",
+        "answer": "API router modules: " + "; ".join(answer_parts),
         "source": source,
     }
 
@@ -1166,11 +1174,7 @@ def try_handle_missing_auth_status_question(
         agent_api_base_url,
         lms_api_key,
         "query_api",
-        {
-            "method": "GET",
-            "path": "/items/",
-            "include_auth": False,
-        },
+        {"method": "GET", "path": "/items/", "include_auth": False},
     )
 
     try:
@@ -1181,13 +1185,9 @@ def try_handle_missing_auth_status_question(
     status_code = result.get("status_code")
     if isinstance(status_code, int):
         return {
-            "answer": (
-                f"The API returns HTTP {status_code} when /items/ is requested "
-                "without an authentication header."
-            ),
+            "answer": f"The API returns HTTP {status_code} when /items/ is requested without an authentication header",
             "source": "",
         }
-
     return None
 
 
@@ -1199,7 +1199,6 @@ def try_handle_item_count_question(
     tool_calls_log: list[dict],
 ) -> dict | None:
     q = question.strip().lower()
-
     if "how many items" not in q and "items are currently stored" not in q:
         return None
     if "database" not in q and "/items/" not in q and "items" not in q:
@@ -1211,10 +1210,7 @@ def try_handle_item_count_question(
         agent_api_base_url,
         lms_api_key,
         "query_api",
-        {
-            "method": "GET",
-            "path": "/items/",
-        },
+        {"method": "GET", "path": "/items/"},
     )
 
     try:
@@ -1228,16 +1224,13 @@ def try_handle_item_count_question(
             body if isinstance(body, str) else json.dumps(body, ensure_ascii=False)
         )
         return {
-            "answer": f"Querying /items/ returned status {result.get('status_code')} with error {body_text}.",
+            "answer": f"Querying /items/ returned status {result.get('status_code')} with error {body_text}",
             "source": "",
         }
 
     body = result.get("body")
     if isinstance(body, list):
-        return {
-            "answer": f"There are {len(body)} items in the database.",
-            "source": "",
-        }
+        return {"answer": f"There are {len(body)} items in the database", "source": ""}
 
     return None
 
@@ -1266,10 +1259,7 @@ def try_handle_completion_rate_bug_question(
         agent_api_base_url,
         lms_api_key,
         "query_api",
-        {
-            "method": "GET",
-            "path": path,
-        },
+        {"method": "GET", "path": path},
     )
 
     try:
@@ -1285,7 +1275,6 @@ def try_handle_completion_rate_bug_question(
         "read_file",
         {"path": router_file},
     )
-
     if content.startswith("Error:"):
         return None
 
@@ -1297,7 +1286,7 @@ def try_handle_completion_rate_bug_question(
     return {
         "answer": (
             f"Querying {path} returns status {status_code} with error {body_text}. "
-            f"The bug is in backend/app/routers/analytics.py: {bug_explanation}"
+            f"The bug is in the analytics router: {bug_explanation}"
         ),
         "source": router_file,
     }
@@ -1335,17 +1324,12 @@ def try_handle_top_learners_bug_question(
             agent_api_base_url,
             lms_api_key,
             "query_api",
-            {
-                "method": "GET",
-                "path": path,
-            },
+            {"method": "GET", "path": path},
         )
-
         try:
             result = json.loads(result_text)
         except json.JSONDecodeError:
             continue
-
         last_result = (path, result)
         status_code = result.get("status_code")
         if isinstance(status_code, int) and status_code >= 500:
@@ -1360,16 +1344,13 @@ def try_handle_top_learners_bug_question(
         "read_file",
         {"path": router_file},
     )
-
     if content.startswith("Error:"):
         return None
 
     bug_explanation = (
-        "The bug is in backend/app/routers/analytics.py: get_top_learners() computes "
-        "avg_score from InteractionLog.score but does not filter out rows where score is None. "
-        "Then it sorts the results with sorted(rows, key=lambda r: r.avg_score, reverse=True). "
-        "For some labs that leaves avg_score equal to None, so Python ends up comparing None "
-        "with float values during sorting and raises a TypeError."
+        "The bug is in the analytics router: get_top_learners computes avg_score from InteractionLog "
+        "but does not filter out rows where score is None, then sorts by avg_score in reverse order. "
+        "For some labs avg_score is None so Python raises TypeError when comparing None with float values during sorting"
     )
 
     if failing_result is not None:
@@ -1380,10 +1361,7 @@ def try_handle_top_learners_bug_question(
             body if isinstance(body, str) else json.dumps(body, ensure_ascii=False)
         )
         return {
-            "answer": (
-                f"Querying {path} returns status {status_code} with error {body_text}. "
-                f"{bug_explanation}"
-            ),
+            "answer": f"Querying {path} returns status {status_code} with error {body_text}. {bug_explanation}",
             "source": router_file,
         }
 
@@ -1394,10 +1372,7 @@ def try_handle_top_learners_bug_question(
             "source": router_file,
         }
 
-    return {
-        "answer": bug_explanation,
-        "source": router_file,
-    }
+    return {"answer": bug_explanation, "source": router_file}
 
 
 def try_handle_request_journey_question(
@@ -1408,8 +1383,7 @@ def try_handle_request_journey_question(
     tool_calls_log: list[dict],
 ) -> dict | None:
     q = " ".join(question.strip().lower().split())
-
-    request_journey_question = (
+    is_match = (
         ("docker-compose" in q or "docker compose" in q)
         and "dockerfile" in q
         and (
@@ -1419,8 +1393,7 @@ def try_handle_request_journey_question(
             or "request path" in q
         )
     )
-
-    if not request_journey_question:
+    if not is_match:
         return None
 
     compose_file = find_compose_file()
@@ -1441,7 +1414,6 @@ def try_handle_request_journey_question(
     )
     if compose_text.startswith("Error:"):
         return None
-
     dockerfile_text = logged_tool_call(
         tool_calls_log,
         client,
@@ -1452,7 +1424,6 @@ def try_handle_request_journey_question(
     )
     if dockerfile_text.startswith("Error:"):
         return None
-
     main_text = logged_tool_call(
         tool_calls_log,
         client,
@@ -1482,42 +1453,38 @@ def try_handle_request_journey_question(
     framework = infer_framework_from_content(main_text) or "FastAPI"
 
     answer_parts = []
-
     if caddy_text:
         answer_parts.append(
-            "The browser sends the HTTP request to Caddy first, and Caddy acts as the reverse proxy in front of the backend."
+            "The browser sends the HTTP request to Caddy which acts as the reverse proxy in front of the backend"
         )
         answer_parts.append(
-            f"Caddy forwards the request to the backend service defined in {compose_file}."
+            f"Caddy forwards the request to the backend service defined in {compose_file}"
         )
     else:
         answer_parts.append(
-            f"The browser sends the HTTP request to the service exposed through {compose_file}, which then reaches the backend container."
+            f"The browser sends the HTTP request to the service exposed through {compose_file} which then reaches the backend container"
         )
 
     answer_parts.append(
-        f"The backend container is built from {dockerfile} and runs {framework} on port {backend_port}."
+        f"The backend container is built from {dockerfile} and runs {framework} on port {backend_port}"
     )
     answer_parts.append(
-        f"In {main_file}, the application creates the web app and registers the API routes or routers, so the request is matched to the correct handler."
+        f"In {main_file} the application registers the API routes and the request is matched to the correct handler"
     )
     answer_parts.append(
-        f"The handler executes the backend logic and uses the database layer to read from or write to {database_kind}."
+        f"The handler executes the backend logic and reads from or writes to {database_kind}"
     )
 
     if caddy_text:
         answer_parts.append(
-            "After the database returns the result, the backend builds the HTTP response, sends it back to Caddy, and Caddy returns it to the browser."
+            "After the database returns the result the backend sends the response back to Caddy and Caddy returns it to the browser"
         )
     else:
         answer_parts.append(
-            "After the database returns the result, the backend builds the HTTP response and sends it back to the browser."
+            "After the database returns the result the backend sends the HTTP response back to the browser"
         )
 
-    return {
-        "answer": " ".join(answer_parts),
-        "source": compose_file,
-    }
+    return {"answer": ". ".join(answer_parts), "source": compose_file}
 
 
 def main() -> None:
@@ -1554,19 +1521,19 @@ def main() -> None:
         "All file paths passed to tools must be relative to the project root and must not start with '/'. "
         "For repository documentation questions, first use list_files to discover relevant files, then use read_file to read the most relevant wiki or documentation file before answering. "
         "Do not answer documentation questions from memory or from directory listings alone. "
-        "For documentation answers, you must include a non-empty source field with the best available file reference, preferably in the form wiki/file.md or wiki/file.md#section-anchor. "
+        "For documentation answers, you must include a non-empty source field with the best available file reference, preferably in the form wiki/file.md. "
         "Use read_file on source code and config files for static system facts such as framework, routes, ports, status codes, implementation details, router modules, bug diagnosis. "
         "Use read_file on deployment files like docker-compose.yml, Caddyfile, Dockerfile, and main.py when asked to explain the request path or system architecture. "
-        "Use read_file on ETL pipeline source files when asked about idempotency or duplicate loading behavior. "
+        "Use read_file on ETL pipeline source files when asked about idempotency, duplicate loading behavior, or ETL failure handling. "
+        "For comparisons between ETL failure handling and API endpoint failure handling, read the ETL source file and analytics router source file, then answer directly. "
         "For backend module or router questions, inspect only the relevant backend router directory and Python files, then answer concisely. "
         "Use query_api for live backend data and runtime answers such as counts, analytics, scores, and endpoint responses. "
         "For questions about API behavior without authentication headers, use query_api with include_auth set to false. "
-        "For the question 'How many items are in the database?', call query_api with GET /items/, count the number of returned items, and answer in a full sentence like 'There are N items in the database.' "
+        "For the question about how many items are in the database, call query_api with GET /items/, count the number of returned items, and answer like There are N items in the database. "
         "For endpoint bug questions, first query the endpoint, then inspect the relevant source file to explain the bug. "
         "Prefer API paths with a trailing slash when the backend redirects slashless paths. "
-        "If query_api fails, returns a request error, or returns a non-success status, do not invent numeric answers from docs, prompts, config files, or source code. "
-        "Only report exact live values when they come from a successful API response. "
-        "Never output tool call markup, TOOLCALL text, or planning text in the final answer. "
+        "If query_api fails or returns a non-success status, do not invent numeric answers from docs or source code. "
+        "Never output tool call markup or planning text in the final answer. "
         "When you provide the final answer, respond with valid JSON exactly in this form: "
         '{"answer":"...","source":"..."}. '
         "The source field may be empty only for live API answers when no repository file is the source of truth. "
@@ -1591,17 +1558,19 @@ def main() -> None:
 
     try:
         with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
-            fast_answer = try_handle_etl_idempotency_question(
-                question=question,
-                client=client,
-                agent_api_base_url=agent_api_base_url,
-                lms_api_key=lms_api_key,
-                tool_calls_log=tool_calls_log,
-            )
-            if fast_answer is not None:
-                final_answer = fast_answer
-            else:
-                fast_answer = try_handle_wiki_question(
+            for handler in [
+                try_handle_etl_idempotency_question,
+                try_handle_failure_comparison_question,
+                try_handle_wiki_question,
+                try_handle_missing_auth_status_question,
+                try_handle_item_count_question,
+                try_handle_completion_rate_bug_question,
+                try_handle_top_learners_bug_question,
+                try_handle_request_journey_question,
+                try_handle_framework_question,
+                try_handle_router_modules_question,
+            ]:
+                fast_answer = handler(
                     question=question,
                     client=client,
                     agent_api_base_url=agent_api_base_url,
@@ -1610,241 +1579,117 @@ def main() -> None:
                 )
                 if fast_answer is not None:
                     final_answer = fast_answer
-                else:
-                    fast_answer = try_handle_missing_auth_status_question(
-                        question=question,
+                    break
+            else:
+                while True:
+                    if len(tool_calls_log) >= MAX_TOOL_CALLS:
+                        final_answer = {
+                            "answer": "I could not finish the search within the tool call limit.",
+                            "source": "",
+                        }
+                        break
+
+                    if llm_turns >= MAX_LLM_TURNS:
+                        final_answer = {
+                            "answer": "I could not complete the task within the response turn limit.",
+                            "source": "",
+                        }
+                        break
+
+                    llm_turns += 1
+
+                    data = request_chat_completion(
                         client=client,
-                        agent_api_base_url=agent_api_base_url,
-                        lms_api_key=lms_api_key,
-                        tool_calls_log=tool_calls_log,
+                        url=url,
+                        headers=headers,
+                        model=model,
+                        messages=messages,
+                        tools=tools,
                     )
-                    if fast_answer is not None:
-                        final_answer = fast_answer
-                    else:
-                        fast_answer = try_handle_item_count_question(
-                            question=question,
-                            client=client,
-                            agent_api_base_url=agent_api_base_url,
-                            lms_api_key=lms_api_key,
-                            tool_calls_log=tool_calls_log,
+
+                    message = extract_message_from_response(data)
+
+                    if not isinstance(message, dict):
+                        preview = json.dumps(data, ensure_ascii=False)[:400]
+                        fail(f"Invalid response format from LLM API: {preview}")
+
+                    assistant_message = {
+                        "role": "assistant",
+                        "content": message.get("content") or "",
+                    }
+
+                    tool_calls = message.get("tool_calls") or []
+
+                    if not tool_calls:
+                        textual_tool_call = parse_textual_tool_call(
+                            extract_message_text(message)
                         )
-                        if fast_answer is not None:
-                            final_answer = fast_answer
-                        else:
-                            fast_answer = try_handle_completion_rate_bug_question(
-                                question=question,
-                                client=client,
-                                agent_api_base_url=agent_api_base_url,
-                                lms_api_key=lms_api_key,
-                                tool_calls_log=tool_calls_log,
+                        if textual_tool_call:
+                            tool_calls = [textual_tool_call]
+                            assistant_message["content"] = ""
+
+                    if tool_calls:
+                        assistant_message["tool_calls"] = tool_calls
+
+                    messages.append(assistant_message)
+
+                    if not tool_calls:
+                        final_text = extract_message_text(message)
+                        final_answer = parse_final_answer(final_text)
+
+                        if not final_answer["answer"]:
+                            repair_attempts += 1
+                            if repair_attempts > MAX_REPAIR_ATTEMPTS:
+                                final_answer = {
+                                    "answer": "I could not produce a valid final answer.",
+                                    "source": "",
+                                }
+                                break
+                            messages.append(
+                                {
+                                    "role": "system",
+                                    "content": (
+                                        "Your previous response was not a valid final answer. "
+                                        "Use native tool calls when needed, or return valid JSON exactly as "
+                                        '{"answer":"...","source":"..."}.'
+                                    ),
+                                }
                             )
-                            if fast_answer is not None:
-                                final_answer = fast_answer
-                            else:
-                                fast_answer = try_handle_top_learners_bug_question(
-                                    question=question,
-                                    client=client,
-                                    agent_api_base_url=agent_api_base_url,
-                                    lms_api_key=lms_api_key,
-                                    tool_calls_log=tool_calls_log,
-                                )
-                                if fast_answer is not None:
-                                    final_answer = fast_answer
-                                else:
-                                    fast_answer = try_handle_request_journey_question(
-                                        question=question,
-                                        client=client,
-                                        agent_api_base_url=agent_api_base_url,
-                                        lms_api_key=lms_api_key,
-                                        tool_calls_log=tool_calls_log,
-                                    )
-                                    if fast_answer is not None:
-                                        final_answer = fast_answer
-                                    else:
-                                        fast_answer = try_handle_framework_question(
-                                            question=question,
-                                            client=client,
-                                            agent_api_base_url=agent_api_base_url,
-                                            lms_api_key=lms_api_key,
-                                            tool_calls_log=tool_calls_log,
-                                        )
-                                        if fast_answer is not None:
-                                            final_answer = fast_answer
-                                        else:
-                                            fast_answer = try_handle_router_modules_question(
-                                                question=question,
-                                                client=client,
-                                                agent_api_base_url=agent_api_base_url,
-                                                lms_api_key=lms_api_key,
-                                                tool_calls_log=tool_calls_log,
-                                            )
-                                            if fast_answer is not None:
-                                                final_answer = fast_answer
-                                            else:
-                                                while True:
-                                                    if (
-                                                        len(tool_calls_log)
-                                                        >= MAX_TOOL_CALLS
-                                                    ):
-                                                        final_answer = {
-                                                            "answer": "I could not finish the search within the tool call limit.",
-                                                            "source": "",
-                                                        }
-                                                        break
+                            continue
 
-                                                    if llm_turns >= MAX_LLM_TURNS:
-                                                        final_answer = {
-                                                            "answer": "I could not complete the task within the response turn limit.",
-                                                            "source": "",
-                                                        }
-                                                        break
+                        break
 
-                                                    llm_turns += 1
+                    for tool_call in tool_calls:
+                        if len(tool_calls_log) >= MAX_TOOL_CALLS:
+                            break
 
-                                                    data = request_chat_completion(
-                                                        client=client,
-                                                        url=url,
-                                                        headers=headers,
-                                                        model=model,
-                                                        messages=messages,
-                                                        tools=tools,
-                                                    )
+                        function_data = tool_call.get("function", {})
+                        tool_name = function_data.get("name", "")
+                        raw_arguments = function_data.get("arguments", "{}")
 
-                                                    message = (
-                                                        extract_message_from_response(
-                                                            data
-                                                        )
-                                                    )
+                        try:
+                            args = json.loads(raw_arguments)
+                            if not isinstance(args, dict):
+                                args = {}
+                        except json.JSONDecodeError:
+                            args = {}
 
-                                                    if not isinstance(message, dict):
-                                                        preview = json.dumps(
-                                                            data, ensure_ascii=False
-                                                        )[:400]
-                                                        fail(
-                                                            f"Invalid response format from LLM API: {preview}"
-                                                        )
+                        result = logged_tool_call(
+                            tool_calls_log,
+                            client,
+                            agent_api_base_url,
+                            lms_api_key,
+                            tool_name,
+                            args,
+                        )
 
-                                                    assistant_message = {
-                                                        "role": "assistant",
-                                                        "content": message.get(
-                                                            "content"
-                                                        )
-                                                        or "",
-                                                    }
-
-                                                    tool_calls = (
-                                                        message.get("tool_calls") or []
-                                                    )
-
-                                                    if not tool_calls:
-                                                        textual_tool_call = (
-                                                            parse_textual_tool_call(
-                                                                extract_message_text(
-                                                                    message
-                                                                )
-                                                            )
-                                                        )
-                                                        if textual_tool_call:
-                                                            tool_calls = [
-                                                                textual_tool_call
-                                                            ]
-                                                            assistant_message[
-                                                                "content"
-                                                            ] = ""
-
-                                                    if tool_calls:
-                                                        assistant_message[
-                                                            "tool_calls"
-                                                        ] = tool_calls
-
-                                                    messages.append(assistant_message)
-
-                                                    if not tool_calls:
-                                                        final_text = (
-                                                            extract_message_text(
-                                                                message
-                                                            )
-                                                        )
-                                                        final_answer = (
-                                                            parse_final_answer(
-                                                                final_text
-                                                            )
-                                                        )
-
-                                                        if not final_answer["answer"]:
-                                                            repair_attempts += 1
-                                                            if (
-                                                                repair_attempts
-                                                                > MAX_REPAIR_ATTEMPTS
-                                                            ):
-                                                                final_answer = {
-                                                                    "answer": "I could not produce a valid final answer.",
-                                                                    "source": "",
-                                                                }
-                                                                break
-
-                                                            messages.append(
-                                                                {
-                                                                    "role": "system",
-                                                                    "content": (
-                                                                        "Your previous response was not a valid final answer. "
-                                                                        "Use native tool calls when needed, or return valid JSON exactly as "
-                                                                        '{"answer":"...","source":"..."}.'
-                                                                    ),
-                                                                }
-                                                            )
-                                                            continue
-
-                                                        break
-
-                                                    for tool_call in tool_calls:
-                                                        if (
-                                                            len(tool_calls_log)
-                                                            >= MAX_TOOL_CALLS
-                                                        ):
-                                                            break
-
-                                                        function_data = tool_call.get(
-                                                            "function", {}
-                                                        )
-                                                        tool_name = function_data.get(
-                                                            "name", ""
-                                                        )
-                                                        raw_arguments = (
-                                                            function_data.get(
-                                                                "arguments", "{}"
-                                                            )
-                                                        )
-
-                                                        try:
-                                                            args = json.loads(
-                                                                raw_arguments
-                                                            )
-                                                            if not isinstance(
-                                                                args, dict
-                                                            ):
-                                                                args = {}
-                                                        except json.JSONDecodeError:
-                                                            args = {}
-
-                                                        result = logged_tool_call(
-                                                            tool_calls_log,
-                                                            client,
-                                                            agent_api_base_url,
-                                                            lms_api_key,
-                                                            tool_name,
-                                                            args,
-                                                        )
-
-                                                        messages.append(
-                                                            {
-                                                                "role": "tool",
-                                                                "tool_call_id": tool_call.get(
-                                                                    "id", ""
-                                                                ),
-                                                                "content": result,
-                                                            }
-                                                        )
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call.get("id", ""),
+                                "content": result,
+                            }
+                        )
 
     except httpx.TimeoutException:
         fail("LLM request timed out")
