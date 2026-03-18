@@ -1570,13 +1570,17 @@ def main() -> None:
                 try_handle_framework_question,
                 try_handle_router_modules_question,
             ]:
-                fast_answer = handler(
-                    question=question,
-                    client=client,
-                    agent_api_base_url=agent_api_base_url,
-                    lms_api_key=lms_api_key,
-                    tool_calls_log=tool_calls_log,
-                )
+                try:
+                    fast_answer = handler(
+                        question=question,
+                        client=client,
+                        agent_api_base_url=agent_api_base_url,
+                        lms_api_key=lms_api_key,
+                        tool_calls_log=tool_calls_log,
+                    )
+                except Exception as _handler_err:
+                    print(f"Handler {handler.__name__} raised: {_handler_err}", file=sys.stderr)
+                    fast_answer = None
                 if fast_answer is not None:
                     final_answer = fast_answer
                     break
@@ -1611,7 +1615,9 @@ def main() -> None:
 
                     if not isinstance(message, dict):
                         preview = json.dumps(data, ensure_ascii=False)[:400]
-                        fail(f"Invalid response format from LLM API: {preview}")
+                        print(f"Invalid response format from LLM API: {preview}", file=sys.stderr)
+                        final_answer = {"answer": "Could not parse a valid response from the LLM.", "source": ""}
+                        break
 
                     assistant_message = {
                         "role": "assistant",
@@ -1692,12 +1698,12 @@ def main() -> None:
                         )
 
     except httpx.TimeoutException:
-        fail("LLM request timed out")
+        final_answer = {"answer": "The request timed out while processing your question.", "source": ""}
     except httpx.HTTPStatusError as e:
         body = e.response.text.strip()
-        fail(f"LLM API error {e.response.status_code}: {body}")
+        final_answer = {"answer": f"LLM API error {e.response.status_code}: {body}", "source": ""}
     except Exception as e:
-        fail(f"Unexpected error: {e}")
+        final_answer = {"answer": f"An internal error occurred: {e}", "source": ""}
 
     final_answer = normalize_final_answer(question, final_answer, tool_calls_log)
     final_answer = normalize_source(final_answer, tool_calls_log)
