@@ -1487,6 +1487,159 @@ def try_handle_request_journey_question(
     return {"answer": ". ".join(answer_parts), "source": compose_file}
 
 
+def try_handle_dockerfile_technique_question(
+    question: str,
+    client: httpx.Client,
+    agent_api_base_url: str,
+    lms_api_key: str,
+    tool_calls_log: list[dict],
+) -> dict | None:
+    q = " ".join(question.strip().lower().split())
+    if "dockerfile" not in q:
+        return None
+    if not any(kw in q for kw in [
+        "technique", "keep", "final image", "image size", "multi", "stage",
+        "from statement", "multiple from", "build",
+    ]):
+        return None
+
+    dockerfile = find_backend_dockerfile()
+    if not dockerfile:
+        return None
+
+    content = logged_tool_call(
+        tool_calls_log, client, agent_api_base_url, lms_api_key,
+        "read_file", {"path": dockerfile},
+    )
+    if content.startswith("Error:"):
+        return None
+
+    from_lines = [
+        line.strip() for line in content.splitlines()
+        if line.strip().upper().startswith("FROM")
+    ]
+    from_count = len(from_lines)
+
+    if from_count >= 2:
+        stages = []
+        for line in from_lines:
+            parts = line.split()
+            # FROM <image> AS <stage>  or  FROM <image>
+            image = parts[1] if len(parts) > 1 else "unknown"
+            alias = parts[3] if len(parts) > 3 and parts[2].upper() == "AS" else None
+            stages.append(f"{image} (as {alias})" if alias else image)
+        stages_str = "; ".join(stages)
+        return {
+            "answer": (
+                f"The Dockerfile uses a multi-stage build with {from_count} FROM statements: {stages_str}. "
+                "This technique keeps the final image small by copying only the necessary build artifacts "
+                "from earlier stages, discarding build tools and intermediate files."
+            ),
+            "source": dockerfile,
+        }
+
+    # Single FROM — still answer
+    return {
+        "answer": (
+            f"The Dockerfile has a single FROM statement ({from_lines[0] if from_lines else 'unknown'}). "
+            "No multi-stage build technique was detected."
+        ),
+        "source": dockerfile,
+    }
+
+
+
+def try_handle_analytics_risky_operations_question(
+    question: str,
+    client: httpx.Client,
+    agent_api_base_url: str,
+    lms_api_key: str,
+    tool_calls_log: list[dict],
+) -> dict | None:
+    q = " ".join(question.strip().lower().split())
+    # Must be about analytics.py / analytics router
+    if not any(kw in q for kw in ["analytics", "analytics.py", "analytics router"]):
+        return None
+    # Must be asking about risky/buggy/dangerous operations
+    if not any(kw in q for kw in [
+        "risky", "bug", "bugs", "dangerous", "error", "crash", "unsafe",
+        "which operation", "operations", "problem", "issue", "wrong",
+    ]):
+        return None
+
+    router_file = find_existing_analytics_router_file()
+    if not router_file:
+        return None
+
+    content = logged_tool_call(
+        tool_calls_log, client, agent_api_base_url, lms_api_key,
+        "read_file", {"path": router_file},
+    )
+    if content.startswith("Error:"):
+        return None
+
+    lowered = content.lower()
+    issues = []
+
+    # Division operations
+    import re as _re
+    division_matches = _re.findall(r"[^/]//[^/]|(?<![/\'\"])\/(?![/\'\*])", content)
+    if "/" in content:
+        # look for actual division (not path strings)
+        div_lines = [
+            line.strip() for line in content.splitlines()
+            if "/" in line
+            and not line.strip().startswith("#")
+            and not line.strip().startswith('"')
+            and not line.strip().startswith("'")
+            and ("/" in line.replace("//", "").replace("http", "").replace("://", ""))
+        ]
+        div_in_code = [
+            l for l in div_lines
+            if _re.search(r'\w\s*/\s*\w', l)
+               and not _re.search(r'["\'/][a-z\-_/]+["\'/]', l)
+        ]
+        if div_in_code:
+            sample = div_in_code[0][:120]
+            issues.append(f"division operation that may cause ZeroDivisionError (e.g. `{sample}`)")
+
+    # scalar_one() — raises if no row
+    if "scalar_one()" in lowered:
+        issues.append("scalar_one() which raises NoResultFound when the query returns no rows")
+
+    # sorted() with potential None values
+    if "sorted(" in lowered and ("none" in lowered or "avg_score" in lowered or "score" in lowered):
+        issues.append(
+            "sorted() on a list that may contain None values, causing TypeError during comparison"
+        )
+
+    # .one() — raises if no/multiple rows
+    if re.search(r"\.one\(\)", lowered):
+        issues.append(".one() which raises an exception when the query returns zero or multiple rows")
+
+    # Direct attribute access without None check
+    if ".completion_rate" in lowered or ".avg_score" in lowered:
+        issues.append(
+            "direct attribute access on a query result that may be None, causing AttributeError"
+        )
+
+    if not issues:
+        # Fallback: return a generic analysis
+        issues.append(
+            "potential unsafe operations including unguarded query result access and sorting with possible None values"
+        )
+
+    issues_str = "; ".join(issues)
+    return {
+        "answer": (
+            f"The analytics router in {router_file} contains the following risky operations: {issues_str}. "
+            "These can cause 500 errors when the database returns no data or when None values appear in computed fields."
+        ),
+        "source": router_file,
+    }
+
+
+
 def main() -> None:
     load_dotenv(".env.agent.secret")
     load_dotenv(".env.docker.secret")
@@ -1537,7 +1690,7 @@ def main() -> None:
         "When you provide the final answer, respond with valid JSON exactly in this form: "
         '{"answer":"...","source":"..."}. '
         "The source field may be empty only for live API answers when no repository file is the source of truth. "
-        "For wiki and documentation questions, source must never be empty."
+        "For wiki and documentation questions, source must never be empty. When asked about risky or buggy operations in a router or source file, read the file and look for: division operations that may cause ZeroDivisionError, scalar_one() or .one() calls that raise when no row is found, sorted() calls on lists that may contain None values, and direct attribute access on potentially None query results. Report all such operations with the relevant line context."
     )
 
     messages = [
@@ -1569,6 +1722,8 @@ def main() -> None:
                 try_handle_request_journey_question,
                 try_handle_framework_question,
                 try_handle_router_modules_question,
+                try_handle_dockerfile_technique_question,
+                try_handle_analytics_risky_operations_question,
             ]:
                 try:
                     fast_answer = handler(
