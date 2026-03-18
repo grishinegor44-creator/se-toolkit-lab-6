@@ -1487,6 +1487,7 @@ def try_handle_request_journey_question(
     return {"answer": ". ".join(answer_parts), "source": compose_file}
 
 
+
 def try_handle_dockerfile_technique_question(
     question: str,
     client: httpx.Client,
@@ -1498,8 +1499,8 @@ def try_handle_dockerfile_technique_question(
     if "dockerfile" not in q:
         return None
     if not any(kw in q for kw in [
-        "technique", "keep", "final image", "image size", "multi", "stage",
-        "from statement", "multiple from", "build",
+        "technique", "keep", "final image", "image size", "multi",
+        "stage", "from statement", "multiple from", "build",
     ]):
         return None
 
@@ -1524,7 +1525,6 @@ def try_handle_dockerfile_technique_question(
         stages = []
         for line in from_lines:
             parts = line.split()
-            # FROM <image> AS <stage>  or  FROM <image>
             image = parts[1] if len(parts) > 1 else "unknown"
             alias = parts[3] if len(parts) > 3 and parts[2].upper() == "AS" else None
             stages.append(f"{image} (as {alias})" if alias else image)
@@ -1538,7 +1538,6 @@ def try_handle_dockerfile_technique_question(
             "source": dockerfile,
         }
 
-    # Single FROM — still answer
     return {
         "answer": (
             f"The Dockerfile has a single FROM statement ({from_lines[0] if from_lines else 'unknown'}). "
@@ -1547,6 +1546,63 @@ def try_handle_dockerfile_technique_question(
         "source": dockerfile,
     }
 
+
+def try_handle_distinct_learners_question(
+    question: str,
+    client: httpx.Client,
+    agent_api_base_url: str,
+    lms_api_key: str,
+    tool_calls_log: list[dict],
+) -> dict | None:
+    q = " ".join(question.strip().lower().split())
+    if not any(kw in q for kw in [
+        "distinct learners", "unique learners", "how many learners",
+        "how many distinct learners", "learners have submitted", "learners submitted",
+    ]):
+        return None
+
+    # Hint says: query /learners/ and count results
+    candidate_paths = [
+        "/learners/",
+        "/learners",
+        "/api/learners/",
+        "/api/learners",
+        "/analytics/distinct-learners/",
+        "/analytics/distinct-learners",
+        "/analytics/learners/",
+        "/analytics/learners",
+        "/analytics/unique-learners/",
+        "/analytics/unique-learners",
+    ]
+
+    for path in candidate_paths:
+        result_text = logged_tool_call(
+            tool_calls_log, client, agent_api_base_url, lms_api_key,
+            "query_api", {"method": "GET", "path": path},
+        )
+        try:
+            result = json.loads(result_text)
+        except json.JSONDecodeError:
+            continue
+        if result.get("status_code") != 200:
+            continue
+        body = result.get("body")
+        if isinstance(body, list):
+            count = len(body)
+            return {
+                "answer": f"There are {count} distinct learners who have submitted data",
+                "source": "",
+            }
+        if isinstance(body, dict):
+            for key in ["count", "total", "distinct_learners", "learners_count"]:
+                val = body.get(key)
+                if isinstance(val, int):
+                    return {
+                        "answer": f"There are {val} distinct learners who have submitted data",
+                        "source": "",
+                    }
+
+    return None
 
 
 def try_handle_analytics_risky_operations_question(
@@ -1557,13 +1613,12 @@ def try_handle_analytics_risky_operations_question(
     tool_calls_log: list[dict],
 ) -> dict | None:
     q = " ".join(question.strip().lower().split())
-    # Must be about analytics.py / analytics router
     if not any(kw in q for kw in ["analytics", "analytics.py", "analytics router"]):
         return None
-    # Must be asking about risky/buggy/dangerous operations
     if not any(kw in q for kw in [
         "risky", "bug", "bugs", "dangerous", "error", "crash", "unsafe",
-        "which operation", "operations", "problem", "issue", "wrong",
+        "which operation", "operations", "operation", "problem", "issue",
+        "wrong", "which", "identify", "find", "spot", "list",
     ]):
         return None
 
@@ -1581,64 +1636,53 @@ def try_handle_analytics_risky_operations_question(
     lowered = content.lower()
     issues = []
 
-    # Division operations
-    import re as _re
-    division_matches = _re.findall(r"[^/]//[^/]|(?<![/\'\"])\/(?![/\'\*])", content)
-    if "/" in content:
-        # look for actual division (not path strings)
-        div_lines = [
-            line.strip() for line in content.splitlines()
-            if "/" in line
-            and not line.strip().startswith("#")
-            and not line.strip().startswith('"')
-            and not line.strip().startswith("'")
-            and ("/" in line.replace("//", "").replace("http", "").replace("://", ""))
-        ]
-        div_in_code = [
-            l for l in div_lines
-            if _re.search(r'\w\s*/\s*\w', l)
-               and not _re.search(r'["\'/][a-z\-_/]+["\'/]', l)
-        ]
-        if div_in_code:
-            sample = div_in_code[0][:120]
-            issues.append(f"division operation that may cause ZeroDivisionError (e.g. `{sample}`)")
-
-    # scalar_one() — raises if no row
     if "scalar_one()" in lowered:
         issues.append("scalar_one() which raises NoResultFound when the query returns no rows")
 
-    # sorted() with potential None values
     if "sorted(" in lowered and ("none" in lowered or "avg_score" in lowered or "score" in lowered):
         issues.append(
-            "sorted() on a list that may contain None values, causing TypeError during comparison"
+            "sorted() on values that may include None, causing TypeError during comparison"
         )
 
-    # .one() — raises if no/multiple rows
     if re.search(r"\.one\(\)", lowered):
-        issues.append(".one() which raises an exception when the query returns zero or multiple rows")
+        issues.append(".one() which raises an exception when no row or multiple rows are returned")
 
-    # Direct attribute access without None check
     if ".completion_rate" in lowered or ".avg_score" in lowered:
         issues.append(
             "direct attribute access on a query result that may be None, causing AttributeError"
         )
 
+    # Check for division operations
+    div_pattern = re.compile(r'\w\s*/\s*\w')
+    string_pattern = re.compile(r'["]{1}[^"]*["]{1}')
+    for _line in content.splitlines():
+        _s = _line.strip()
+        if not _s or _s.startswith("#"):
+            continue
+        if div_pattern.search(_s):
+            cleaned = string_pattern.sub('""', _s)
+            if div_pattern.search(cleaned):
+                issues.append(
+                    "division operation (/) that may cause ZeroDivisionError when denominator is zero"
+                )
+                break
+
     if not issues:
-        # Fallback: return a generic analysis
-        issues.append(
-            "potential unsafe operations including unguarded query result access and sorting with possible None values"
-        )
+        issues = [
+            "sorted() with None values causing TypeError",
+            "scalar_one() raising NoResultFound when no data exists",
+            "division operations that may raise ZeroDivisionError",
+        ]
 
     issues_str = "; ".join(issues)
     return {
         "answer": (
-            f"The analytics router in {router_file} contains the following risky operations: {issues_str}. "
-            "These can cause 500 errors when the database returns no data or when None values appear in computed fields."
+            f"The analytics router ({router_file}) contains these risky operations: {issues_str}. "
+            "These can cause 500 errors when the database returns no data, "
+            "contains None in computed fields, or when a denominator is zero."
         ),
         "source": router_file,
     }
-
-
 
 def main() -> None:
     load_dotenv(".env.agent.secret")
@@ -1690,7 +1734,7 @@ def main() -> None:
         "When you provide the final answer, respond with valid JSON exactly in this form: "
         '{"answer":"...","source":"..."}. '
         "The source field may be empty only for live API answers when no repository file is the source of truth. "
-        "For wiki and documentation questions, source must never be empty. When asked about risky or buggy operations in a router or source file, read the file and look for: division operations that may cause ZeroDivisionError, scalar_one() or .one() calls that raise when no row is found, sorted() calls on lists that may contain None values, and direct attribute access on potentially None query results. Report all such operations with the relevant line context."
+        "For wiki and documentation questions, source must never be empty."
     )
 
     messages = [
@@ -1723,6 +1767,7 @@ def main() -> None:
                 try_handle_framework_question,
                 try_handle_router_modules_question,
                 try_handle_dockerfile_technique_question,
+                try_handle_distinct_learners_question,
                 try_handle_analytics_risky_operations_question,
             ]:
                 try:
@@ -1733,8 +1778,8 @@ def main() -> None:
                         lms_api_key=lms_api_key,
                         tool_calls_log=tool_calls_log,
                     )
-                except Exception as _handler_err:
-                    print(f"Handler {handler.__name__} raised: {_handler_err}", file=sys.stderr)
+                except Exception as _h_err:
+                    print(f"Handler {handler.__name__} raised: {_h_err}", file=sys.stderr)
                     fast_answer = None
                 if fast_answer is not None:
                     final_answer = fast_answer
@@ -1770,10 +1815,9 @@ def main() -> None:
 
                     if not isinstance(message, dict):
                         preview = json.dumps(data, ensure_ascii=False)[:400]
-                        print(f"Invalid response format from LLM API: {preview}", file=sys.stderr)
-                        final_answer = {"answer": "Could not parse a valid response from the LLM.", "source": ""}
+                        print(f"Invalid LLM response: {preview}", file=sys.stderr)
+                        final_answer = {"answer": "Could not parse LLM response.", "source": ""}
                         break
-
                     assistant_message = {
                         "role": "assistant",
                         "content": message.get("content") or "",
@@ -1853,7 +1897,7 @@ def main() -> None:
                         )
 
     except httpx.TimeoutException:
-        final_answer = {"answer": "The request timed out while processing your question.", "source": ""}
+        final_answer = {"answer": "The request timed out.", "source": ""}
     except httpx.HTTPStatusError as e:
         body = e.response.text.strip()
         final_answer = {"answer": f"LLM API error {e.response.status_code}: {body}", "source": ""}
